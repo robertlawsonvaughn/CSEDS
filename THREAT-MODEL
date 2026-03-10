@@ -1,0 +1,98 @@
+# CSEDS Threat Model
+
+## Overview
+
+This document defines the security assumptions, threat actors, and explicit boundaries of the CSEDS architecture. Understanding what CSEDS **does not protect against** is as important as understanding what it does.
+
+---
+
+## Trust Boundaries
+
+| Component | Trust Level | Notes |
+|---|---|---|
+| Client device (owned) | High | User physically controls device |
+| Client browser/runtime | Medium | Assumed uncompromised |
+| Server | Low | Treated as untrusted storage |
+| Network | Untrusted | All sensitive data encrypted before transmission |
+| Other devices (user-owned) | Medium | Trusted after credential bootstrap |
+
+---
+
+## What CSEDS Protects Against
+
+### 1. Server-Side Data Exposure
+The server stores only ciphertext. A full server breach exposes encrypted blobs only. Without the client-derived encryption key — which never leaves the client — data remains unreadable.
+
+### 2. Network Interception
+All user data is encrypted client-side before transmission. An attacker intercepting traffic sees only ciphertext blobs and authentication tokens. The encryption key is never transmitted.
+
+### 3. Server-Side Credential Exposure
+Authentication uses a derived auth token, not the raw password. The encryption key is derived independently via a separate Argon2 branch. Compromise of the auth token does not yield the encryption key.
+
+### 4. Passive Server Curiosity
+The server operator cannot read user data. This is enforced architecturally, not by policy. The server is cryptographically blind to content.
+
+### 5. Cross-Device Data Leakage
+Each device independently derives the encryption key from user credentials. No key material is ever stored server-side or transmitted between devices.
+
+---
+
+## What CSEDS Does NOT Protect Against
+
+### 1. Compromised Client Device
+If a device is compromised (malware, physical access to unlocked browser), an attacker can access:
+- The local credential escrow (IndexedDB)
+- The derived encryption key in memory during an active session
+- Decrypted data in memory or local storage
+
+**CSEDS does not protect against a compromised client. The client is the trust root.**
+
+### 2. Weak Passwords
+Argon2 significantly raises the cost of brute-force attacks, but a weak password remains a weak password. CSEDS implementations SHOULD enforce minimum password complexity requirements.
+
+### 3. Simultaneous Multi-Device Editing
+CSEDS enforces single-session via server-side session invalidation. If this constraint is bypassed or not implemented correctly, last-write-wins behavior will result in data loss. Implementations MUST enforce single active session.
+
+### 4. Truly Forgotten Credentials on a New Device
+If a user forgets credentials and has no access to a previously bootstrapped device, data is unrecoverable. The local credential escrow exists only on devices where the user has previously authenticated. This is a deliberate design tradeoff favoring simplicity over server-side recovery complexity.
+
+### 5. Browser Storage Tampering
+The local credential escrow stored in IndexedDB is cleartext by design on a trusted device. It is not protected against a user or process with direct browser storage access on that device.
+
+### 6. Server Authentication Bypass
+If the server authentication layer is compromised, an attacker could replace encrypted blobs or cause data loss. CSEDS does not protect data integrity beyond encryption — implementations SHOULD consider blob signing.
+
+### 7. Side-Channel Attacks
+Timing attacks, memory analysis, or other side-channel techniques against the client runtime are out of scope.
+
+### 8. Regulatory Compliance
+CSEDS is an architectural pattern, not a compliance framework. Implementations requiring HIPAA, GDPR, SOC2, or similar compliance must conduct independent assessment.
+
+---
+
+## Explicit Non-Goals
+
+- **Zero-Knowledge Proof** — CSEDS is not a cryptographic zero-knowledge system. It is a practical privacy architecture where the server is operationally blind but not mathematically provably so.
+- **Forward Secrecy** — Key rotation is not defined in this specification. Implementations requiring forward secrecy must extend the architecture accordingly.
+- **Multi-Party Access** — CSEDS is designed for single-user multi-device scenarios. Shared access or collaborative editing is out of scope.
+- **P2P Synchronization** — Server mediation is a deliberate architectural choice. Peer-to-peer sync without server intermediation is explicitly out of scope.
+
+---
+
+## Attacker Model Summary
+
+| Attacker | Can Access | Cannot Access |
+|---|---|---|
+| Network eavesdropper | Ciphertext, auth tokens | Plaintext data, encryption key |
+| Compromised server | Ciphertext blobs, auth token hashes | Plaintext data, encryption key |
+| Physical access to locked device | Nothing useful | Everything |
+| Physical access to unlocked device | Everything | N/A — device is trust root |
+| Malicious server operator | Ciphertext only | Plaintext data |
+
+---
+
+## Revision History
+
+| Version | Date | Notes |
+|---|---|---|
+| 1.0 | 2026-03-10 | Initial release |
