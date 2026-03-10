@@ -1,5 +1,6 @@
 # CSEDS
 ## Client-Side Encrypted Data Synchronization
+<img width="770" height="718" alt="image" src="https://github.com/user-attachments/assets/c8dc867f-b0d2-45cd-b2df-aef580885e21" />
 
 *A server-mediated multi-device sync architecture with client-side key derivation and local credential escrow*
 
