@@ -1,0 +1,959 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CSEDS — Reference Implementation</title>
+
+  <!-- Argon2-browser via CDN (WASM-based, runs entirely in browser) -->
+  <script src="https://cdn.jsdelivr.net/npm/argon2-browser@1.18.0/dist/argon2-bundled.min.js"></script>
+
+  <style>
+    /* -----------------------------------------------------------------------
+       Design: Industrial/utilitarian — this is a reference implementation,
+       not a product. Monospace, technical, honest.
+    ----------------------------------------------------------------------- */
+    :root {
+      --bg:        #0f1117;
+      --surface:   #1a1d27;
+      --border:    #2e3245;
+      --accent:    #4f9cf9;
+      --accent2:   #7c6af7;
+      --success:   #3ecf8e;
+      --warning:   #f5a623;
+      --danger:    #f24545;
+      --text:      #e2e8f0;
+      --muted:     #64748b;
+      --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+      --font-body: 'IBM Plex Sans', 'Segoe UI', sans-serif;
+      --radius:    6px;
+      --transition: 180ms ease;
+    }
+
+    @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap');
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-body);
+      font-size: 14px;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      padding: 40px 16px;
+    }
+
+    /* Header */
+    .header {
+      width: 100%;
+      max-width: 560px;
+      margin-bottom: 32px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 16px;
+    }
+    .header h1 {
+      font-family: var(--font-mono);
+      font-size: 20px;
+      font-weight: 600;
+      color: var(--accent);
+      letter-spacing: -0.5px;
+    }
+    .header p {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 4px;
+      font-family: var(--font-mono);
+    }
+
+    /* Card */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 28px;
+      width: 100%;
+      max-width: 560px;
+      margin-bottom: 16px;
+    }
+    .card-title {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 20px;
+    }
+
+    /* Forms */
+    .field { margin-bottom: 16px; }
+    .field label {
+      display: block;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      margin-bottom: 6px;
+      font-family: var(--font-mono);
+    }
+    .field input, .field textarea {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-family: var(--font-mono);
+      font-size: 13px;
+      padding: 10px 12px;
+      outline: none;
+      transition: border-color var(--transition);
+    }
+    .field input:focus, .field textarea:focus {
+      border-color: var(--accent);
+    }
+    .field textarea {
+      resize: vertical;
+      min-height: 180px;
+      line-height: 1.6;
+    }
+
+    /* Buttons */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 9px 18px;
+      border-radius: var(--radius);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      transition: opacity var(--transition), transform var(--transition);
+      letter-spacing: 0.3px;
+    }
+    .btn:hover { opacity: 0.88; transform: translateY(-1px); }
+    .btn:active { transform: translateY(0); }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+    .btn-primary  { background: var(--accent);  color: #fff; }
+    .btn-secondary{ background: var(--border);  color: var(--text); }
+    .btn-success  { background: var(--success); color: #fff; }
+    .btn-danger   { background: var(--danger);  color: #fff; }
+    .btn-ghost    { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+
+    .btn-row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 20px;
+    }
+
+    /* Status / alerts */
+    .status {
+      padding: 10px 14px;
+      border-radius: var(--radius);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      margin-top: 14px;
+      display: none;
+      line-height: 1.5;
+    }
+    .status.show { display: block; }
+    .status.info    { background: rgba(79,156,249,0.12); border: 1px solid rgba(79,156,249,0.3); color: var(--accent); }
+    .status.success { background: rgba(62,207,142,0.12); border: 1px solid rgba(62,207,142,0.3); color: var(--success); }
+    .status.error   { background: rgba(242,69,69,0.12);  border: 1px solid rgba(242,69,69,0.3);  color: var(--danger); }
+    .status.warning { background: rgba(245,166,35,0.12); border: 1px solid rgba(245,166,35,0.3); color: var(--warning); }
+
+    /* Sync bar */
+    .sync-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 14px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      margin-bottom: 16px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--muted);
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .sync-indicator {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .sync-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--muted);
+      transition: background 400ms;
+    }
+    .sync-dot.synced  { background: var(--success); }
+    .sync-dot.syncing { background: var(--warning); animation: pulse 1s infinite; }
+    .sync-dot.error   { background: var(--danger); }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+
+    /* Session badge */
+    .session-badge {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 12px;
+      background: rgba(79,156,249,0.08);
+      border: 1px solid rgba(79,156,249,0.2);
+      border-radius: var(--radius);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--accent);
+      margin-bottom: 20px;
+    }
+
+    /* Tab nav */
+    .tab-nav {
+      display: flex;
+      gap: 2px;
+      margin-bottom: 28px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 3px;
+      width: 100%;
+      max-width: 560px;
+    }
+    .tab-btn {
+      flex: 1;
+      padding: 8px;
+      background: transparent;
+      border: none;
+      border-radius: 4px;
+      color: var(--muted);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      transition: all var(--transition);
+    }
+    .tab-btn.active {
+      background: var(--surface);
+      color: var(--text);
+    }
+
+    /* Recovery box */
+    .recovery-box {
+      background: rgba(245,166,35,0.08);
+      border: 1px solid rgba(245,166,35,0.3);
+      border-radius: var(--radius);
+      padding: 16px;
+      font-family: var(--font-mono);
+      font-size: 13px;
+      line-height: 1.8;
+      display: none;
+    }
+    .recovery-box.show { display: block; }
+    .recovery-box .label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+    .recovery-box .value { color: var(--warning); font-weight: 600; }
+
+    /* Tech note */
+    .tech-note {
+      font-size: 10px;
+      color: var(--muted);
+      font-family: var(--font-mono);
+      line-height: 1.7;
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border);
+    }
+    .tech-note span { color: var(--accent2); }
+
+    /* Spinner */
+    .spinner {
+      display: inline-block;
+      width: 12px; height: 12px;
+      border: 2px solid rgba(255,255,255,0.2);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Views */
+    .view { display: none; width: 100%; max-width: 560px; }
+    .view.active { display: block; }
+
+    /* Link-style button */
+    .link-btn {
+      background: none;
+      border: none;
+      color: var(--accent);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      cursor: pointer;
+      padding: 0;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+    .link-btn:hover { color: var(--accent2); }
+
+    hr.divider {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 20px 0;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <div class="header">
+    <h1>CSEDS</h1>
+    <p>Client-Side Encrypted Data Synchronization — Reference Implementation v1.0</p>
+  </div>
+
+  <!-- AUTH VIEWS (login / register tabs) -->
+  <div class="view active" id="view-auth">
+    <div class="tab-nav">
+      <button class="tab-btn active" onclick="switchTab('login')">Login</button>
+      <button class="tab-btn" onclick="switchTab('register')">Register</button>
+    </div>
+
+    <!-- Login -->
+    <div id="tab-login">
+      <div class="card">
+        <div class="card-title">Authenticate</div>
+        <div class="field">
+          <label>Username</label>
+          <input type="text" id="login-username" autocomplete="username" placeholder="username" />
+        </div>
+        <div class="field">
+          <label>Password</label>
+          <input type="password" id="login-password" autocomplete="current-password" placeholder="••••••••" />
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-primary" onclick="doLogin()" id="btn-login">Login</button>
+          <button class="link-btn" onclick="showRecovery()" style="margin-left:auto;align-self:center;">
+            Forgot credentials?
+          </button>
+        </div>
+        <div class="status" id="login-status"></div>
+
+        <div class="tech-note">
+          <span>Key derivation:</span> Argon2id (64MB / 3 iter) → 64 bytes →
+          AuthKey[0:32] + EncryptKey[32:64]<br>
+          <span>Auth:</span> AuthKey verified server-side via bcrypt<br>
+          <span>EncryptKey:</span> never transmitted — derived locally only
+        </div>
+      </div>
+
+      <!-- Recovery -->
+      <div class="card" id="recovery-card" style="display:none;">
+        <div class="card-title">Local Credential Recovery</div>
+        <p style="font-size:12px;color:var(--muted);margin-bottom:16px;">
+          Reading credentials from local IndexedDB escrow on this device.
+          This only works on a device where you have previously logged in.
+        </p>
+        <div class="recovery-box" id="recovery-box"></div>
+        <div class="status" id="recovery-status"></div>
+        <div class="btn-row">
+          <button class="btn btn-ghost" onclick="hideRecovery()">Close</button>
+        </div>
+        <div class="tech-note">
+          <span>IndexedDB #2</span> (credential escrow) is populated on every
+          successful login. Cleartext by design — device is the trust boundary.
+        </div>
+      </div>
+    </div>
+
+    <!-- Register -->
+    <div id="tab-register" style="display:none;">
+      <div class="card">
+        <div class="card-title">Create Account</div>
+        <div class="field">
+          <label>Username</label>
+          <input type="text" id="reg-username" autocomplete="username" placeholder="choose a username" />
+        </div>
+        <div class="field">
+          <label>Password</label>
+          <input type="password" id="reg-password" autocomplete="new-password" placeholder="••••••••" />
+        </div>
+        <div class="field">
+          <label>Confirm Password</label>
+          <input type="password" id="reg-confirm" autocomplete="new-password" placeholder="••••••••" />
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-primary" onclick="doRegister()" id="btn-register">Register</button>
+        </div>
+        <div class="status" id="register-status"></div>
+        <div class="tech-note">
+          <span>Salt:</span> 16 bytes CSPRNG, stored server-side (not secret)<br>
+          <span>Argon2id</span> params stored alongside salt for future upgrades<br>
+          <span>Server stores:</span> bcrypt(AuthKey) + salt — never password
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MAIN APP VIEW -->
+  <div class="view" id="view-app">
+    <div class="session-badge">
+      <span>●</span>
+      <span id="session-username"></span>
+      <span style="margin-left:auto;color:var(--muted);">session active</span>
+      <button class="link-btn" onclick="doLogout()">logout</button>
+    </div>
+
+    <div class="sync-bar">
+      <div class="sync-indicator">
+        <div class="sync-dot" id="sync-dot"></div>
+        <span id="sync-label">Not synced</span>
+      </div>
+      <span id="sync-meta" style="color:var(--muted);"></span>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Encrypted Data Store</div>
+      <div class="field">
+        <label>Your Data (plaintext here — encrypted before leaving device)</label>
+        <textarea id="data-editor" placeholder="Type anything here. This data will be encrypted client-side with AES-256-GCM before upload. The server receives only ciphertext."></textarea>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-success" onclick="saveData()" id="btn-save">
+          Save &amp; Sync
+        </button>
+        <button class="btn btn-secondary" onclick="syncDown()" id="btn-sync">
+          Pull from Server
+        </button>
+      </div>
+      <div class="status" id="app-status"></div>
+
+      <div class="tech-note">
+        <span>Encryption:</span> AES-256-GCM, unique IV per operation<br>
+        <span>Sync direction:</span> server timestamp is sole source of truth<br>
+        <span>Blob:</span> entire IndexedDB #1 serialized → encrypted → uploaded<br>
+        <span>Single session:</span> new login on another device will invalidate this session
+      </div>
+    </div>
+  </div>
+
+<script>
+// =============================================================================
+// CSEDS Client Reference Implementation
+// Apache 2.0 License
+// =============================================================================
+
+const API = '';  // Same origin — FastAPI serves this file
+
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+let sessionToken = null;
+let encryptKey   = null;  // CryptoKey object — never leaves memory
+let currentUser  = null;
+
+// ---------------------------------------------------------------------------
+// IndexedDB helpers
+// ---------------------------------------------------------------------------
+
+function openDB(name, version, upgradeCallback) {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(name, version);
+    req.onupgradeneeded = e => upgradeCallback(e.target.result);
+    req.onsuccess = e => resolve(e.target.result);
+    req.onerror   = e => reject(e.target.error);
+  });
+}
+
+async function getDataDB() {
+  return openDB('cseds_data', 1, db => {
+    if (!db.objectStoreNames.contains('store')) {
+      db.createObjectStore('store');
+    }
+  });
+}
+
+async function getEscrowDB() {
+  return openDB('cseds_escrow', 1, db => {
+    if (!db.objectStoreNames.contains('credentials')) {
+      db.createObjectStore('credentials');
+    }
+  });
+}
+
+function idbGet(db, store, key) {
+  return new Promise((resolve, reject) => {
+    const tx  = db.transaction(store, 'readonly');
+    const req = tx.objectStore(store).get(key);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror   = () => reject(req.error);
+  });
+}
+
+function idbPut(db, store, key, value) {
+  return new Promise((resolve, reject) => {
+    const tx  = db.transaction(store, 'readwrite');
+    const req = tx.objectStore(store).put(value, key);
+    req.onsuccess = () => resolve();
+    req.onerror   = () => reject(req.error);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Argon2id Key Derivation
+// ---------------------------------------------------------------------------
+
+const ARGON2_PARAMS = {
+  time:    3,       // iterations
+  mem:     65536,   // 64 MB
+  parallelism: 1,
+  hashLen: 64,      // 64 bytes → split into AuthKey + EncryptKey
+  type:    argon2.ArgonType.Argon2id
+};
+
+async function deriveKeys(password, saltHex) {
+  const saltBytes = hexToBytes(saltHex);
+
+  const result = await argon2.hash({
+    pass: password,
+    salt: saltBytes,
+    ...ARGON2_PARAMS
+  });
+
+  // result.hash is a Uint8Array of 64 bytes
+  const authKeyBytes    = result.hash.slice(0, 32);   // bytes 0-31
+  const encryptKeyBytes = result.hash.slice(32, 64);  // bytes 32-63
+
+  // Auth key: base64 encode for transmission
+  const authKey = bytesToBase64(authKeyBytes);
+
+  // Encrypt key: import as CryptoKey for Web Crypto API
+  const encKey = await crypto.subtle.importKey(
+    'raw',
+    encryptKeyBytes,
+    { name: 'AES-GCM' },
+    false,          // not extractable
+    ['encrypt', 'decrypt']
+  );
+
+  return { authKey, encKey };
+}
+
+// ---------------------------------------------------------------------------
+// AES-256-GCM Encrypt / Decrypt
+// ---------------------------------------------------------------------------
+
+async function encryptBlob(data, cryptoKey) {
+  const iv          = crypto.getRandomValues(new Uint8Array(12));
+  const encoded     = new TextEncoder().encode(JSON.stringify(data));
+  const ciphertext  = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv },
+    cryptoKey,
+    encoded
+  );
+  return {
+    iv:         bytesToBase64(iv),
+    ciphertext: bytesToBase64(new Uint8Array(ciphertext))
+  };
+}
+
+async function decryptBlob(blobObj, cryptoKey) {
+  const iv         = base64ToBytes(blobObj.iv);
+  const ciphertext = base64ToBytes(blobObj.ciphertext);
+  const decrypted  = await crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv },
+    cryptoKey,
+    ciphertext
+  );
+  return JSON.parse(new TextDecoder().decode(decrypted));
+}
+
+// ---------------------------------------------------------------------------
+// API helpers
+// ---------------------------------------------------------------------------
+
+async function api(method, path, body = null) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (sessionToken) headers['Authorization'] = `Bearer ${sessionToken}`;
+  const res = await fetch(`${API}/api${path}`, {
+    method,
+    headers,
+    body: body ? JSON.stringify(body) : null
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    // Session expired / forced logout
+    if (res.status === 401) {
+      handleForcedLogout();
+    }
+    throw new Error(data.detail || 'API error');
+  }
+  return data;
+}
+
+// ---------------------------------------------------------------------------
+// Registration
+// ---------------------------------------------------------------------------
+
+async function doRegister() {
+  const username = document.getElementById('reg-username').value.trim();
+  const password = document.getElementById('reg-password').value;
+  const confirm  = document.getElementById('reg-confirm').value;
+  const statusEl = document.getElementById('register-status');
+  const btn      = document.getElementById('btn-register');
+
+  if (!username || !password) return showStatus(statusEl, 'error', 'Username and password required');
+  if (password !== confirm)   return showStatus(statusEl, 'error', 'Passwords do not match');
+  if (password.length < 8)    return showStatus(statusEl, 'error', 'Password must be at least 8 characters');
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Deriving keys...';
+  showStatus(statusEl, 'info', 'Running Argon2id key derivation — this takes a moment intentionally...');
+
+  try {
+    // Generate random salt
+    const saltBytes = crypto.getRandomValues(new Uint8Array(16));
+    const saltHex   = bytesToHex(saltBytes);
+
+    // Derive keys
+    const { authKey } = await deriveKeys(password, saltHex);
+
+    showStatus(statusEl, 'info', 'Registering with server...');
+
+    await api('POST', '/register', {
+      username,
+      auth_key_hash: authKey,   // server will bcrypt this
+      salt: saltHex,
+      argon_params: JSON.stringify(ARGON2_PARAMS)
+    });
+
+    showStatus(statusEl, 'success', 'Registration successful. Logging in...');
+
+    // Auto-login after registration
+    setTimeout(() => {
+      document.getElementById('login-username').value = username;
+      document.getElementById('login-password').value = password;
+      switchTab('login');
+      doLogin();
+    }, 800);
+
+  } catch (err) {
+    showStatus(statusEl, 'error', err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Register';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Login
+// ---------------------------------------------------------------------------
+
+async function doLogin() {
+  const username = document.getElementById('login-username').value.trim();
+  const password = document.getElementById('login-password').value;
+  const statusEl = document.getElementById('login-status');
+  const btn      = document.getElementById('btn-login');
+
+  if (!username || !password) return showStatus(statusEl, 'error', 'Username and password required');
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Deriving keys...';
+  showStatus(statusEl, 'info', 'Retrieving salt from server...');
+
+  try {
+    // Step 1: Get salt from server
+    const saltData = await api('GET', `/salt/${encodeURIComponent(username)}`);
+
+    if (!saltData.exists) {
+      throw new Error('Invalid credentials');
+    }
+
+    showStatus(statusEl, 'info', 'Running Argon2id key derivation...');
+
+    // Step 2: Derive keys
+    const { authKey, encKey } = await deriveKeys(password, saltData.salt);
+
+    showStatus(statusEl, 'info', 'Authenticating...');
+
+    // Step 3: Authenticate with server using AuthKey
+    const loginData = await api('POST', '/login', {
+      username,
+      auth_key: authKey
+    });
+
+    // Step 4: Store session state in memory only
+    sessionToken = loginData.token;
+    encryptKey   = encKey;
+    currentUser  = username;
+
+    // Step 5: Populate credential escrow (IndexedDB #2)
+    await populateEscrow(username, password);
+
+    // Step 6: Sync blob from server
+    showStatus(statusEl, 'info', 'Syncing data...');
+    await syncDown(true);
+
+    // Step 7: Show app view
+    showAppView();
+
+  } catch (err) {
+    showStatus(statusEl, 'error', err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Login';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Credential Escrow (IndexedDB #2)
+// ---------------------------------------------------------------------------
+
+async function populateEscrow(username, password) {
+  const db = await getEscrowDB();
+  await idbPut(db, 'credentials', 'username', username);
+  await idbPut(db, 'credentials', 'password', password);
+}
+
+async function readEscrow() {
+  const db = await getEscrowDB();
+  const username = await idbGet(db, 'credentials', 'username');
+  const password = await idbGet(db, 'credentials', 'password');
+  return { username, password };
+}
+
+async function showRecovery() {
+  const card   = document.getElementById('recovery-card');
+  const box    = document.getElementById('recovery-box');
+  const status = document.getElementById('recovery-status');
+
+  card.style.display = 'block';
+
+  try {
+    const { username, password } = await readEscrow();
+
+    if (!username) {
+      box.classList.remove('show');
+      showStatus(status, 'warning',
+        'No credentials found in local escrow. This device has not been previously bootstrapped, ' +
+        'or browser storage was cleared.');
+      return;
+    }
+
+    box.innerHTML = `
+      <div class="label">Username</div>
+      <div class="value">${escapeHtml(username)}</div>
+      <br>
+      <div class="label">Password</div>
+      <div class="value">${escapeHtml(password)}</div>
+    `;
+    box.classList.add('show');
+    showStatus(status, 'success', 'Credentials retrieved from local IndexedDB #2 (credential escrow).');
+
+  } catch (err) {
+    showStatus(status, 'error', 'Could not read local escrow: ' + err.message);
+  }
+}
+
+function hideRecovery() {
+  document.getElementById('recovery-card').style.display = 'none';
+  document.getElementById('recovery-box').classList.remove('show');
+}
+
+// ---------------------------------------------------------------------------
+// Blob Sync
+// ---------------------------------------------------------------------------
+
+async function syncDown(silent = false) {
+  const statusEl = document.getElementById('app-status');
+  setSyncState('syncing', 'Syncing...');
+
+  try {
+    const serverMeta = await api('GET', '/blob/meta');
+    const db         = await getDataDB();
+    const localTs    = await idbGet(db, 'store', 'last_server_timestamp') || 0;
+
+    if (serverMeta.server_timestamp > localTs && serverMeta.blob_data !== null) {
+      // Server is newer — pull and decrypt
+      const serverBlob = await api('GET', '/blob');
+
+      if (serverBlob.blob_data) {
+        const blobObj   = JSON.parse(atob(serverBlob.blob_data));
+        const plaintext = await decryptBlob(blobObj, encryptKey);
+
+        await idbPut(db, 'store', 'user_data', plaintext.data);
+        await idbPut(db, 'store', 'last_server_timestamp', serverBlob.server_timestamp);
+
+        document.getElementById('data-editor').value = plaintext.data || '';
+
+        setSyncState('synced', 'Synced from server');
+        updateSyncMeta(serverBlob.server_timestamp, serverBlob.blob_size);
+        if (!silent) showStatus(statusEl, 'success', 'Data pulled and decrypted from server.');
+      } else {
+        setSyncState('synced', 'No server data yet');
+      }
+    } else {
+      setSyncState('synced', 'Up to date');
+      updateSyncMeta(serverMeta.server_timestamp, serverMeta.blob_size);
+      if (!silent) showStatus(statusEl, 'info', 'Local data is current — no sync needed.');
+    }
+
+  } catch (err) {
+    setSyncState('error', 'Sync failed');
+    if (!silent) showStatus(statusEl, 'error', 'Sync failed: ' + err.message);
+  }
+}
+
+async function saveData() {
+  const statusEl = document.getElementById('app-status');
+  const btn      = document.getElementById('btn-save');
+  const data     = document.getElementById('data-editor').value;
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Encrypting...';
+  setSyncState('syncing', 'Uploading...');
+
+  try {
+    // Encrypt the data
+    const blobObj    = await encryptBlob({ data }, encryptKey);
+    const blobBase64 = btoa(JSON.stringify(blobObj));
+
+    // Upload to server
+    const result = await api('PUT', '/blob', { blob_data: blobBase64 });
+
+    // Update local timestamp
+    const db = await getDataDB();
+    await idbPut(db, 'store', 'user_data', data);
+    await idbPut(db, 'store', 'last_server_timestamp', result.server_timestamp);
+
+    setSyncState('synced', 'Synced');
+    updateSyncMeta(result.server_timestamp, result.blob_size);
+    showStatus(statusEl, 'success',
+      `Data encrypted (AES-256-GCM) and uploaded. ` +
+      `Server timestamp: ${new Date(result.server_timestamp).toLocaleTimeString()} · ` +
+      `Blob size: ${result.blob_size} bytes`
+    );
+
+  } catch (err) {
+    setSyncState('error', 'Upload failed');
+    showStatus(statusEl, 'error', 'Save failed: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Save & Sync';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Logout
+// ---------------------------------------------------------------------------
+
+async function doLogout() {
+  try { await api('POST', '/logout'); } catch (_) {}
+  clearSession();
+  showAuthView();
+}
+
+function handleForcedLogout() {
+  clearSession();
+  showAuthView();
+  const statusEl = document.getElementById('login-status');
+  showStatus(statusEl, 'warning',
+    'You were logged out because your account was accessed on another device.');
+}
+
+function clearSession() {
+  sessionToken = null;
+  encryptKey   = null;
+  currentUser  = null;
+}
+
+// ---------------------------------------------------------------------------
+// UI helpers
+// ---------------------------------------------------------------------------
+
+function showAppView() {
+  document.getElementById('view-auth').classList.remove('active');
+  document.getElementById('view-app').classList.add('active');
+  document.getElementById('session-username').textContent = currentUser;
+  setSyncState('synced', 'Synced');
+}
+
+function showAuthView() {
+  document.getElementById('view-app').classList.remove('active');
+  document.getElementById('view-auth').classList.add('active');
+  document.getElementById('login-password').value = '';
+  document.getElementById('data-editor').value = '';
+  setSyncState('', 'Not synced');
+}
+
+function switchTab(tab) {
+  document.getElementById('tab-login').style.display    = tab === 'login'    ? 'block' : 'none';
+  document.getElementById('tab-register').style.display = tab === 'register' ? 'block' : 'none';
+  document.querySelectorAll('.tab-btn').forEach((b, i) => {
+    b.classList.toggle('active', (i === 0 && tab === 'login') || (i === 1 && tab === 'register'));
+  });
+  hideRecovery();
+}
+
+function showStatus(el, type, msg) {
+  el.className = `status ${type} show`;
+  el.textContent = msg;
+}
+
+function setSyncState(state, label) {
+  const dot = document.getElementById('sync-dot');
+  const lbl = document.getElementById('sync-label');
+  dot.className = `sync-dot ${state}`;
+  lbl.textContent = label;
+}
+
+function updateSyncMeta(ts, size) {
+  const el = document.getElementById('sync-meta');
+  if (ts) {
+    el.textContent = `${new Date(ts).toLocaleTimeString()} · ${size} bytes`;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Utility functions
+// ---------------------------------------------------------------------------
+
+function hexToBytes(hex) {
+  const arr = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < hex.length; i += 2) {
+    arr[i / 2] = parseInt(hex.substr(i, 2), 16);
+  }
+  return arr;
+}
+
+function bytesToHex(bytes) {
+  return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function bytesToBase64(bytes) {
+  return btoa(String.fromCharCode(...bytes));
+}
+
+function base64ToBytes(b64) {
+  return new Uint8Array(atob(b64).split('').map(c => c.charCodeAt(0)));
+}
+
+function escapeHtml(str) {
+  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+</script>
+</body>
+</html>
